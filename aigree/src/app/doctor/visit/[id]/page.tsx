@@ -492,12 +492,14 @@ function ChatPanel({
         {result && (
           <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
             <p className="text-xs font-medium text-slate-500">Q: {result.question}</p>
-            <p className="whitespace-pre-wrap text-sm text-slate-900">{result.answer}</p>
+            <div className="whitespace-pre-wrap text-sm leading-relaxed text-slate-900">
+              {renderAnswer(result.answer, result.citations)}
+            </div>
             {result.citations.length > 0 && (
               <div className="flex flex-wrap gap-1">
-                {result.citations.map((c) => (
+                {result.citations.map((c, i) => (
                   <Badge key={c} color="blue">
-                    {titleOf.get(c) ?? "record"} · {c.slice(0, 8)}
+                    [{i + 1}] {titleOf.get(c) ?? "record"}
                   </Badge>
                 ))}
               </div>
@@ -529,5 +531,24 @@ function ChatPanel({
         <p className="text-xs text-slate-500">Assistive only – not a diagnosis. Questions and answers are not stored.</p>
       </div>
     </Card>
+  );
+}
+
+/**
+ * Render an assistant answer: **bold** becomes bold, and record citations ([rec:<id>], possibly
+ * shortened or grouped) become numbered references matching the citation badges.
+ */
+function renderAnswer(answer: string, citations: string[]) {
+  const num = (cited: string) => {
+    const i = citations.findIndex((c) => c === cited || (cited.length >= 6 && c.startsWith(cited)));
+    return i >= 0 ? `[${i + 1}]` : "";
+  };
+  const text = answer
+    .replace(/\[((?:\s*,?\s*(?:rec|r):[A-Za-z0-9_-]+)+)\s*\]/g, (_, ids: string) =>
+      [...ids.matchAll(/(?:rec|r):([A-Za-z0-9_-]+)/g)].map((m) => num(m[1])).join(""),
+    )
+    .replace(/\b(?:rec|r):([A-Za-z0-9_-]{6,})/g, (_, id: string) => num(id));
+  return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
+    part.startsWith("**") && part.endsWith("**") ? <strong key={i}>{part.slice(2, -2)}</strong> : <span key={i}>{part}</span>,
   );
 }
