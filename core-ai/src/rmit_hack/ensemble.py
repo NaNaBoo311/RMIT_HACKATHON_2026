@@ -1,6 +1,9 @@
 """Assemble OOF from fold outputs, tune per-class log-prob biases, write a submission.
 
   uv run python -m rmit_hack.ensemble outputs/runA [outputs/runB ...] --name xyz [--weights 1,0.5]
+      [--avg geo|prob] [--no-bias]
+--avg geo (default) = mean of log-probs then softmax; prob = mean of probs.
+Written submission uses tuned biases (shrunk x0.5) only if nested > raw + 0.001, else raw.
 Folds that are missing are skipped: OOF metrics use only the available rows.
 """
 
@@ -24,6 +27,18 @@ def macro_f1(y, pred, k=K):
     return float(np.mean(np.where(denom > 0, 2 * tp / np.maximum(denom, 1), 0.0)))
 
 
+def combine(arrs, w, avg="geo"):
+    """Weighted average of [N,K] prob arrays (nan rows propagate). Returns probs."""
+    w = np.asarray(w, dtype=float)
+    w = w / w.sum()
+    if avg == "prob":
+        return sum(wi * a for wi, a in zip(w, arrs))
+    lg = sum(wi * np.log(np.clip(a, 0, 1) + 1e-9) for wi, a in zip(w, arrs))
+    lg = lg - lg.max(-1, keepdims=True)
+    e = np.exp(lg)
+    return e / e.sum(-1, keepdims=True)
+
+
 def tune_bias(logp, y, lo=-3.0, hi=3.0, step=0.1):
     grid = np.round(np.arange(lo, hi + 1e-9, step), 3)
     best, best_b = -1.0, np.zeros(K)
@@ -38,7 +53,7 @@ def tune_bias(logp, y, lo=-3.0, hi=3.0, step=0.1):
     return best, best_b
 
 
-def load_run(run_dir: Path, ids: np.ndarray, test_ids: np.ndarray):
+def load_run(run_dir: Path, ids: np.ndarray, test_ids: np.ndarray, avg: str = "geo"):
     """Return oof [N,3] (nan where missing), test mean [T,3], available folds."""
     id2pos = {i: p for p, i in enumerate(ids)}
     oof = np.full((len(ids), K), np.nan)
@@ -61,7 +76,7 @@ def load_run(run_dir: Path, ids: np.ndarray, test_ids: np.ndarray):
         folds.append(int(fd.name.removeprefix("fold")))
     if not tests:
         raise SystemExit(f"no complete folds in {run_dir}")
-    return oof, np.mean(tests, 0), folds
+    return oof, combine(tests, np.ones(len(tests)), avg), folds
 
 
 def main():
@@ -69,7 +84,10 @@ def main():
     ap.add_argument("runs", nargs="+", type=Path)
     ap.add_argument("--name", required=True)
     ap.add_argument("--weights", default="", help="comma-separated per-run weights")
-    ap.add_argument("--no-bias", action="store_true", help="skip applying tuned biases")
+    ap.add_argument("--avg", choices=["prob", "geo"], default="geo")
+    ap.add_argument(
+        "--no-bias", action="store_true", help="force raw argmax in the written csv"
+    )
     a = ap.parse_args()
 
     train = pd.read_csv(config.RAW_DIR / config.TRAIN_FILE)
@@ -86,11 +104,10 @@ def main():
         else np.ones(len(a.runs))
     )
     assert len(w) == len(a.runs)
-    w = w / w.sum()
 
     oofs, tests = [], []
     for r in a.runs:
-        o, t, fl = load_run(r, ids, test["id"].to_numpy())
+        o, t, fl = load_run(r, ids, test["id"].to_numpy(), a.avg)
         have = ~np.isnan(o[:, 0])
         print(
             f"{r}: folds {fl}  OOF macro-F1 (n={have.sum()}) = {macro_f1(y[have], o[have].argmax(-1)):.4f}"
@@ -98,10 +115,11 @@ def main():
         oofs.append(o)
         tests.append(t)
 
-    # combine over runs on rows available in all runs (weighted mean of probs)
+    # combine over runs on rows available in all runs (weighted, --avg)
     have = np.all([~np.isnan(o[:, 0]) for o in oofs], axis=0)
-    oof = sum(wi * o for wi, o in zip(w, oofs))
-    test_p = sum(wi * t for wi, t in zip(w, tests))
+    print(f"avg={a.avg} weights={(w / w.sum()).round(3).tolist()}")
+    oof = combine(oofs, w, a.avg)
+    test_p = combine(tests, w, a.avg)
     yh, ph = y[have], np.log(np.clip(oof[have], 1e-9, 1))
     fh = fold_of[have]
     print(f"\nEnsemble rows with OOF: {have.sum()}/{len(y)}")
@@ -113,6 +131,7 @@ def main():
         f"tuned OOF macro-F1: {tuned:.4f}  biases (B,J,PI) = {bias.round(2).tolist()}"
     )
 
+    nested = None
     avail = sorted(set(fh.tolist()))
     if len(avail) >= 2:
         pred = np.zeros(len(yh), dtype=int)
@@ -120,9 +139,8 @@ def main():
             m = fh == f
             _, b = tune_bias(ph[~m], yh[~m])
             pred[m] = (ph[m] + b).argmax(-1)
-        print(
-            f"nested bias estimate (tune on other folds, apply to held-out): {macro_f1(yh, pred):.4f}"
-        )
+        nested = macro_f1(yh, pred)
+        print(f"nested bias estimate (tune on other folds, apply to held-out): {nested:.4f}")
     else:
         print("nested estimate skipped (need >=2 folds)")
 
@@ -141,7 +159,13 @@ def main():
         )
     )
 
-    b_apply = np.zeros(K) if a.no_bias else bias
+    if a.no_bias:
+        b_apply, why = np.zeros(K), "--no-bias"
+    elif nested is not None and nested > raw + 0.001:
+        b_apply, why = 0.5 * bias, f"nested {nested:.4f} > raw {raw:.4f} + 0.001; tuned x0.5"
+    else:
+        b_apply, why = np.zeros(K), "nested not > raw + 0.001 (or unavailable); raw used"
+    print(f"\nBIAS APPLIED TO WRITTEN CSV (B,J,PI): {b_apply.round(3).tolist()}  [{why}]")
     logit_te = np.log(np.clip(test_p, 1e-9, 1)) + b_apply
     labels_te = [LABELS[i] for i in logit_te.argmax(-1)]
     sub = sample.copy()

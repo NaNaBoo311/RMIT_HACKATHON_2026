@@ -52,6 +52,7 @@ DEFAULTS = {
     "max_train_samples": None,
     "pseudo_run": "",  # run name whose test_probs.npy are used as pseudo labels
     "pseudo_threshold": 0.95,
+    "lang_weight": "",  # e.g. "pt:2.0,fr:1.5": per-sample train loss multiplier by language
     "fgm_eps": 0.0,  # >0 enables FGM adversarial training on word embeddings
 }
 
@@ -136,9 +137,10 @@ def train_fold(cfg: dict, fold: int):
         return out
 
     class DS(torch.utils.data.Dataset):
-        def __init__(self, texts, ys=None, sort=False):
+        def __init__(self, texts, ys=None, sort=False, lw=None):
             self.ids = encode(texts)
             self.ys = ys
+            self.lw = lw
             n = len(self.ids)
             # `order` sorts by length (fast inference); inverse restores original order
             self.order = (
@@ -156,6 +158,8 @@ def train_fold(cfg: dict, fold: int):
             item = {"input_ids": self.ids[j], "attention_mask": [1] * len(self.ids[j])}
             if self.ys is not None:
                 item["labels"] = int(self.ys[j])
+            if self.lw is not None:
+                item["lw"] = float(self.lw[j])
             return item
 
     t0 = time.time()
@@ -181,7 +185,18 @@ def train_fold(cfg: dict, fold: int):
             f"thr={cfg['pseudo_threshold']}: added {int(sel.sum())}/{len(sel)} "
             + str({labels[c]: int((pl == c).sum()) for c in range(len(labels))})
         )
-    ds_tr = DS(tr_texts, tr_y)
+    lw_map = {}
+    for part in filter(None, (cfg.get("lang_weight") or "").split(",")):
+        k, v = part.split(":")
+        lw_map[k.strip()] = float(v)
+    tr_lw = None
+    if lw_map:
+        n_orig = len(tr_idx)
+        langs_tr = train_df["language"].iloc[tr_idx].to_numpy()
+        tr_lw = np.ones(len(tr_texts), dtype=np.float32)  # pseudo rows stay 1.0
+        tr_lw[:n_orig] = [lw_map.get(str(g), 1.0) for g in langs_tr]
+        print(f"[fold {fold}] lang_weight={lw_map} rows>1: {int((tr_lw != 1).sum())}")
+    ds_tr = DS(tr_texts, tr_y, lw=tr_lw)
     ds_va = (
         None
         if full_fit
@@ -265,13 +280,25 @@ def train_fold(cfg: dict, fold: int):
     class WTrainer(Trainer):
         def compute_loss(self, model, inputs, return_outputs=False, **kw):
             labels_ = inputs.pop("labels")
+            lw_ = inputs.pop("lw", None)
             out = model(**inputs)
-            loss = torch.nn.functional.cross_entropy(
-                out.logits.float(),
-                labels_,
-                weight=cw_t.to(out.logits.device),
-                label_smoothing=cfg["label_smoothing"],
-            )
+            w_ = cw_t.to(out.logits.device)
+            if lw_ is None:
+                loss = torch.nn.functional.cross_entropy(
+                    out.logits.float(),
+                    labels_,
+                    weight=w_,
+                    label_smoothing=cfg["label_smoothing"],
+                )
+            else:  # per-sample language weight on top of class weights
+                per = torch.nn.functional.cross_entropy(
+                    out.logits.float(),
+                    labels_,
+                    weight=w_,
+                    label_smoothing=cfg["label_smoothing"],
+                    reduction="none",
+                )
+                loss = (per * lw_.to(per.device).float()).sum() / w_[labels_].sum()
             return (loss, out) if return_outputs else loss
 
         def training_step(self, model, inputs, *a, **k):
@@ -392,12 +419,21 @@ def train_fold(cfg: dict, fold: int):
         remove_unused_columns=False,
         dataloader_num_workers=2,
     )
+    base_collate = DataCollatorWithPadding(tok)
+
+    def train_collate(feats):
+        lw = [f.pop("lw") for f in feats] if feats and "lw" in feats[0] else None
+        b = base_collate(feats)
+        if lw is not None:
+            b["lw"] = torch.tensor(lw, dtype=torch.float)
+        return b
+
     trainer = WTrainer(
         model=model,
         args=args,
         train_dataset=ds_tr,
         eval_dataset=ds_va,
-        data_collator=DataCollatorWithPadding(tok),
+        data_collator=train_collate,
         compute_metrics=macro_f1,
         callbacks=[timer],
     )
@@ -543,6 +579,7 @@ def main(
     pseudo_run: str = "",
     pseudo_threshold: float = 0.95,
     fgm_eps: float = 0.0,
+    lang_weight: str = "",
     full_fit: bool = False,
     seeds: str = "",
 ):
@@ -573,6 +610,7 @@ def main(
         "pseudo_run": pseudo_run,
         "pseudo_threshold": pseudo_threshold,
         "fgm_eps": fgm_eps,
+        "lang_weight": lang_weight,
     }
     if full_fit:  # one container per seed, all rows, no eval
         seed_list = [int(x) for x in seeds.split(",")] if seeds else [seed]
