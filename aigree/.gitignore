@@ -1,0 +1,27 @@
+node_modules/
+.next/
+out/
+build/
+dist/
+
+# Secrets — operator credentials NEVER belong in the repo (AP-41).
+.env
+.env.local
+.env.*.local
+
+# Local TideCloak state and fetched pack files
+data/tidecloak.json
+data/keycloakdb*
+data/vault/
+.tide-pack/
+tidecloak.json
+data/invite-links.txt
+data/admin-policy.json
+data/.skip-link-wait
+
+# Supabase credentials handed to the app (never commit)
+.supabase
+
+# Simulated Tide service state (whole keys, local only)
+tide-local/.state/
+data/tidecloak.local.json

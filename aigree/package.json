@@ -1,0 +1,35 @@
+{
+  "name": "aigree",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --webpack",
+    "build": "next build --webpack",
+    "start": "next start",
+    "init": "bash scripts/init-tidecloak.sh",
+    "tide:local": "node tide-local/server.mjs",
+    "dev:local": "node tide-local/server.mjs & next dev --webpack",
+    "tide:check": "node tide-local/check-network.mjs",
+    "flows:check": "node tide-local/check-flows.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.1.0",
+    "@supabase/supabase-js": "^2.118.0",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@tidecloak/js": "^0.14.41",
+    "@tidecloak/nextjs": "0.14.17",
+    "@tideorg/js": "^0.14.29",
+    "heimdall-tide": "^0.14.41",
+    "jose": "^6.0.0",
+    "next": "^16.0.0",
+    "postcss": "^8.5.31",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwindcss": "^4.3.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "typescript": "^5.0.0"
+  }
+}
