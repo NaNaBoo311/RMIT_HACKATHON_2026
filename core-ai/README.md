@@ -86,7 +86,7 @@ Nguyên nhân: `group_by_length=True` làm `trainer.predict()` trả về dự �
 
 **EN.** The final C1 submission uses a **single backbone**: `mistralai/Mistral-7B-Instruct-v0.3` (on the approved model list), fine-tuned with LoRA for sequence classification. No external data, no hand labels, no threshold/bias tuning.
 
-**Recipe / Công thức (chung cho cả 5 run):** LoRA r=16, alpha=32, dropout=0.05; lr 5e-5; 2 epochs; batch 8 x grad-accum 2; max_len 512; warmup 0.1; weight decay 0.01; class weights `sqrt`; gradient checkpointing; 5-fold StratifiedGroupKFold (`rmit_hack.folds`); GPU Modal `A100-80GB`. Cờ train: `--model-name mistralai/Mistral-7B-Instruct-v0.3 --lora --folds 0,1,2,3,4 --lr 5e-5 --epochs 2 --batch-size 8 --grad-accum 2 --grad-ckpt --max-len 512 --warmup-ratio 0.1 --gpu A100-80GB`.
+**Recipe / Công thức (chung cho mọi run):** LoRA r=16, alpha=32, dropout=0.05; lr 5e-5; 2 epochs; batch 8 x grad-accum 2; max_len 512; warmup 0.1; weight decay 0.01; class weights `sqrt`; gradient checkpointing; 5-fold StratifiedGroupKFold (`rmit_hack.folds`); GPU Modal `A100-80GB`. Cờ train: `--model-name mistralai/Mistral-7B-Instruct-v0.3 --lora --folds 0,1,2,3,4 --lr 5e-5 --epochs 2 --batch-size 8 --grad-accum 2 --grad-ckpt --max-len 512 --warmup-ratio 0.1 --gpu A100-80GB`.
 
 | Run | Seed | Pseudo-label | OOF macro-F1 (5-fold) |
 |---|---|---|---|
@@ -94,29 +94,43 @@ Nguyên nhân: `group_by_length=True` làm `trainer.predict()` trả về dự �
 | `mistral7b_lora_v3` | 2 | no | 0.9721 |
 | `mistral7b_lora_v4` | 3 | no | 0.9763 |
 | `mistral_pl95` | 7 | teacher v2, thr 0.95 | 0.9793 |
+| `mistral_pl95_s2` | 11 | teacher v2, thr 0.95 | 0.9186: **excluded** (fold 0 diverged to 0.64; folds 1-4 were 0.976-0.985) |
 
-Blend of v2+v3+pl95 (verified): OOF macro-F1 **0.9815** (raw argmax). **Final (v2+v3+v4+pl95) OOF macro-F1: 0.9821** (raw argmax, no thresholds); `submissions/FINAL_mistral.csv` sha256 `53ad2466e6b6baf25dc04b5dc6d130f058bed80a1b60e876184220afa833e406`. `mistral_pl95_s2` was cancelled (out of GPU credit) and is not part of the final.
+Full-fit models (train on all labelled rows, no folds / no OOF; flags: base recipe above with `--full-fit` instead of `--folds`):
 
-**Pseudo-label / Gán nhãn giả.** Teacher = chính model Mistral `mistral7b_lora_v2` của chúng tôi, dự đoán trên text của tập test chưa có nhãn; chỉ giữ các mẫu có `max prob >= 0.95` và thêm vào tập train của mỗi fold (trọng số 1.0). Không có nhãn tay, không có dữ liệu ngoài. / The teacher is our own Mistral v2 run predicting on the unlabeled test text; only samples with max prob >= 0.95 are added to each fold's training set. No hand labels, no external data. (Validation fold rows are never pseudo-labeled from labels; OOF is computed on held-out train rows.)
+| Run | Seeds | Pseudo-label |
+|---|---|---|
+| `mistral_full_pl` | 21, 22, 23 | teacher v2, thr 0.95 |
+| `mistral_full` | 31, 32 | no |
 
-**Blend.** Trung bình nhân (geometric mean = mean of log-probs, rồi argmax) trên dự đoán test của 5 fold x 5 run, trọng số đều. **Không** bias, không threshold (`--no-bias`). Lệnh duy nhất / single command:
+Fold-only fallback (v2+v3+v4+pl95): OOF macro-F1 **0.9821** (raw argmax, no thresholds); `submissions/FINAL_mistral.csv` sha256 `53ad2466e6b6baf25dc04b5dc6d130f058bed80a1b60e876184220afa833e406`. Blend of v2+v3+pl95: 0.9815.
+
+**Final = `submissions/FINAL_mistral_full.csv`**: sha256 `125781c7d933dd24a0907cf17f65321c5efb3b85ec5027be2d151d1baa603b18` = fold runs v2+v3+v4+pl95 (weight 1.0 each; fold-only OOF 0.9821) + 5 full-fit seeds (full_pl s21-23, full s31-32; weight 0.6 each; all passed the gates, agreement 98.8-99.2%), geo-mean, no thresholds. Full-fit models have no OOF, so the final's OOF score is not directly measurable; the OOF above is for the fold-only part.
+
+**Pseudo-label / Gán nhãn giả.** Teacher = chính model Mistral `mistral7b_lora_v2` của chúng tôi, dự đoán trên text của tập test chưa có nhãn; chỉ giữ các mẫu có `max prob >= 0.95` và thêm vào tập train của mỗi fold / full-fit (trọng số 1.0). Không có nhãn tay, không có dữ liệu ngoài. / The teacher is our own Mistral v2 run predicting on the unlabeled test text; only samples with max prob >= 0.95 are added to the training set. No hand labels, no external data. (Validation fold rows are never pseudo-labeled from labels; OOF is computed on held-out train rows.)
+
+**Blend.** Trung bình nhân (geometric mean = mean of log-probs, rồi argmax), **không** bias, không threshold. Thành phần / components: (1) 5 run x 5 fold (mỗi run lấy trung bình các fold trước), trọng số 1.0 mỗi run; (2) 5 model full-fit (mỗi seed một model), trọng số 0.6 mỗi model. Mỗi model full-fit phải qua cổng kiểm tra so với blend fold: phân bố lớp trong ±1.5 điểm so với 62/31/7 và độ đồng thuận argmax >= 0.975 (< 0.985 chỉ cảnh báo); model không qua sẽ bị loại. / Each full-fit model must pass sanity gates vs the fold-avg blend (class distribution within 1.5pt of 62/31/7, argmax agreement >= 0.975, warning below 0.985); failing models are excluded.
 
 ```bash
+uv run python -m rmit_hack.blend_full \
+    --folds outputs/mistral7b_lora_v2 outputs/mistral7b_lora_v3 outputs/mistral7b_lora_v4 outputs/mistral_pl95 outputs/mistral_pl95_s2 \
+    --full outputs/mistral_full_pl outputs/mistral_full --avg geo --name FINAL_mistral_full
+# fallback (folds only, 4 runs):
 uv run python -m rmit_hack.ensemble outputs/mistral7b_lora_v2 outputs/mistral7b_lora_v3 outputs/mistral7b_lora_v4 \
     outputs/mistral_pl95 --avg geo --no-bias --name FINAL_mistral
 ```
 
-Blend là deterministic (đã kiểm: chạy 2 lần cho cùng sha256).
+Blend là deterministic (đã kiểm: chạy 2 lần cho cùng sha256; `blend_full` chỉ-fold tái tạo đúng byte `FINAL_mistral.csv`).
 
 **Reproduce / Cách tái tạo** (từ `core-ai/`):
 
 ```bash
-./scripts/reproduce_final.sh               # full: download data -> folds -> train 5 runs on Modal -> pull -> blend
-./scripts/reproduce_final.sh --blend-only  # chỉ blend outputs/ có sẵn; FAIL nếu thiếu fold nào
-RUNS="mistral7b_lora_v2 mistral7b_lora_v3 mistral_pl95" ./scripts/reproduce_final.sh --blend-only   # override danh sách run
+./scripts/reproduce_final.sh               # full: download data -> folds -> train 5 fold runs + 2 full-fit runs on Modal -> pull -> blend
+./scripts/reproduce_final.sh --blend-only  # chỉ blend outputs/ có sẵn; FAIL nếu thiếu file nào
+FOLD_RUNS="mistral7b_lora_v2 mistral7b_lora_v3 mistral7b_lora_v4 mistral_pl95" FULL_RUNS="" ./scripts/reproduce_final.sh --blend-only   # override
 ```
 
-Danh sách run nằm ở một chỗ: biến `DEFAULT_RUNS` trong `scripts/reproduce_final.sh`. Output: `submissions/FINAL_mistral.csv`. Chạy full cần Modal (profile `xaongoctan`) với GPU **A100-80GB** (~30-50 phút/fold, 5 fold song song mỗi run) và Kaggle token. Seed + cfg đầy đủ của từng run lưu trong `outputs/<run>/fold*/metrics.json` (key `cfg`). Training trên GPU không bit-exact giữa các lần chạy; tính tái tạo được đảm bảo ở bước blend từ các output đã lưu và ở công thức/seed cố định. / GPU training is not bit-exact across reruns; exact reproducibility is guaranteed for the blend step given the saved outputs, and for recipe + seeds.
+Danh sách run nằm ở một chỗ: `DEFAULT_FOLD_RUNS` / `DEFAULT_FULL_RUNS` trong `scripts/reproduce_final.sh`. Output: `submissions/FINAL_mistral_full.csv` (final) và `submissions/FINAL_mistral.csv` (fallback). Chạy full cần Modal (profile `xaongoctan`) với GPU **A100-80GB** (~30-50 phút/fold) và Kaggle token. Seed + cfg đầy đủ của từng run lưu trong `outputs/<run>/{fold*,full_s*}/metrics.json` (key `cfg`). Training trên GPU không bit-exact giữa các lần chạy; tính tái tạo được đảm bảo ở bước blend từ các output đã lưu và ở công thức/seed cố định. / GPU training is not bit-exact across reruns; exact reproducibility is guaranteed for the blend step given the saved outputs, and for recipe + seeds.
 
 **Git commit to cite:** the commit that adds this line (code that produced every final run is in `1af24d1` and later).
 
