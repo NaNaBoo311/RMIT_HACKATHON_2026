@@ -26,3 +26,8 @@ MODAL_VOLUME = "rmit-hack-vol"
 MODAL_MOUNT = Path("/vol")
 MODAL_DATA_DIR = MODAL_MOUNT / "data"
 MODAL_OUTPUT_DIR = MODAL_MOUNT / "outputs"
+
+# Fixed label order used everywhere (probs columns, ensembles, submissions)
+LABELS = ["BENIGN", "JAILBREAK", "PROMPT_INJECTION"]
+FOLDS_FILE = "folds.csv"
+N_FOLDS = 5

@@ -12,13 +12,15 @@ image = (
     modal.Image.debian_slim(python_version="3.12")
     .uv_pip_install(
         "torch==2.8.0",
-        "transformers>=4.56",
+        "transformers>=4.56,<5",
         "accelerate>=1.10",
         "sentencepiece",
         "protobuf",
         "pandas",
         "scikit-learn",
         "pyarrow",
+        "peft>=0.13",
+        "bitsandbytes>=0.46",
     )
     .env({"HF_HOME": "/vol/hf_cache", "TOKENIZERS_PARALLELISM": "false"})
     .add_local_python_source("rmit_hack", "modal_app")

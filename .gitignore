@@ -1,21 +1,53 @@
-# Python / uv
+# ---- Python / uv ----
 __pycache__/
 *.py[cod]
 .venv/
+**/.venv/
 .ruff_cache/
+.pytest_cache/
+.mypy_cache/
 .ipynb_checkpoints/
+*.egg-info/
 
-# Data & outputs (do not commit Kaggle data)
-data/raw/*
-data/processed/*
-!data/**/.gitkeep
-outputs/
-submissions/*.csv
+# ---- Node / Next.js ----
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+npm-debug.log*
+# next-env.d.ts is intentionally NOT ignored (Next default keeps it tracked)
+
+# ---- Data & model artifacts (Challenge 1; core-ai/ plus legacy root paths) ----
+/data/raw/*
+/data/processed/*
+core-ai/data/raw/*
+core-ai/data/processed/*
+!.gitkeep
+/outputs/
+core-ai/outputs/
+/submissions/*.csv
+core-ai/submissions/*.csv
+/models/*
+core-ai/models/*
+!core-ai/models/.gitkeep
 *.zip
+*.npy
+*.joblib
 
-# Secrets
+# ---- Secrets ----
 .env
+.env.local
+.env.*.local
+**/.env
+**/.env.local
+**/.env.*.local
+!.env.example
+!**/.env.example
 kaggle.json
+access_token
 .modal.toml
 
+# ---- OS / editor ----
 .DS_Store
+.idea/
+.vscode/
