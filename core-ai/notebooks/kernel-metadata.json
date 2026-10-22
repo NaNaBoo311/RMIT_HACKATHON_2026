@@ -1,0 +1,14 @@
+{
+  "id": "YOUR_KAGGLE_USERNAME/RMIT_SGS_TEAM_C1",
+  "title": "RMIT_SGS_TEAM_C1",
+  "code_file": "RMIT_C1_mmbert.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_internet": "false",
+  "dataset_sources": [],
+  "competition_sources": ["rmit-hackathon-2026"],
+  "kernel_sources": [],
+  "model_sources": ["aisuko/mmbert-base/transformers/default"]
+}
