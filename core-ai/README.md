@@ -54,7 +54,7 @@ uv run python -m rmit_hack.folds          #    tạo folds.csv (trước push_da
 uv run modal run -m modal_app.train       # 4. k-fold fine-tune xlm-roberta-base trên GPU L4 (các fold song song)
 ./scripts/pull_outputs.sh                 # 5. liệt kê các run
 ./scripts/pull_outputs.sh <run_name>      #    kéo cả thư mục run về outputs/<run_name>/fold*/
-uv run python -m rmit_hack.ensemble outputs/<run_name> --name <sub>  # 6. gộp OOF -> submissions/<sub>.csv (xem Known issue!)
+uv run python -m rmit_hack.ensemble outputs/<run_name> --name <sub>  # 6. gộp OOF -> submissions/<sub>.csv
 ./scripts/submit.sh submissions/<sub>.csv "xlmr-base 3ep"            # 7. nộp
 ```
 
@@ -76,9 +76,9 @@ GPU đổi ở `GPU = "L4"` trong `core-ai/modal_app/train.py` (`T4` rẻ hơn, 
 - Không commit token/data: `.gitignore` ở root đã chặn data, outputs, `kaggle.json`, `.env`.
 - Modal phải được chạy từ `core-ai/` (`cd core-ai && uv run modal run -m modal_app.train ...`) để `add_local_python_source("rmit_hack", "modal_app")` tìm đúng package.
 
-## Known issue — OOF bị lệch nhãn (k-fold pipeline)
+## Đã sửa: OOF bị lệch nhãn (k-fold pipeline)
 
-Trong pipeline k-fold, xác suất OOF được lưu (`fold*/oof.npy`, `oof.csv`) **không khớp thứ tự với nhãn**: ở smoke run, macro-F1 do trainer báo là **0.90** nhưng macro-F1 tính từ OOF đã lưu chỉ **0.33**. Vì `ensemble.py` đọc OOF này (để tune bias và đánh giá), **không tin kết quả của `ensemble.py` và các submission sinh từ nó cho tới khi lỗi được sửa**. Lỗi đang được xử lý riêng, chưa sửa trong thư mục này.
+Nguyên nhân: `group_by_length=True` làm `trainer.predict()` trả về dự đoán theo thứ tự ngẫu nhiên, nên OOF/test probs lưu ra bị lệch (trainer eval 0.90 nhưng OOF 0.33). Giờ OOF/test được dự đoán bằng vòng lặp tuần tự riêng, có assertion kiểm tra OOF macro-F1 khớp trainer eval (±0.01) và `test_ids.npy` khớp thứ tự `test.csv`. Smoke run sau khi sửa: OOF = eval = 0.9016 / 0.9064. Run cũ (trước khi sửa) không dùng được.
 
 ## Inference service (Challenge 2)
 

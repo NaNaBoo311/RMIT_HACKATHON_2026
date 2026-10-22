@@ -80,7 +80,7 @@ Nguồn: [`C1_techniques.md`](C1_techniques.md).
 
 ### Lỗi đã biết (đang sửa)
 
-Smoke run của pipeline k-fold cho thấy eval macro-F1 của trainer là **0.90** nhưng OOF đã lưu chỉ **0.33**: có bug căn chỉnh (alignment) giữa OOF/test probabilities. Đang được sửa. **Không tin kết quả ensemble cho đến khi sửa xong.**
+Smoke run của pipeline k-fold cho thấy eval macro-F1 của trainer là **0.90** nhưng OOF đã lưu chỉ **0.33**: có bug căn chỉnh (alignment) giữa OOF/test probabilities. **Đã sửa** (nguyên nhân: `group_by_length` làm `trainer.predict()` xáo thứ tự); smoke run sau sửa OOF = eval ≈ 0.90.
 
 ## 5. Kế hoạch submit (6 lần)
 

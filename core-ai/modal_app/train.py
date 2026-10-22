@@ -13,9 +13,13 @@ NOT printed - results still land in the volume; check Modal dashboard, then
 `./scripts/pull_outputs.sh <run>` and `uv run python -m rmit_hack.ensemble outputs/<run> --name x`):
   uv run modal run --detach -m modal_app.train ...
 
+Concurrent launches are safe as long as each uses a distinct --run-name (outputs go to
+/vol/outputs/<run_name>/); the default run name is <model>_<MMDD_HHMM>, so always pass
+--run-name explicitly when launching several at the same minute.
+
 Per fold, in /vol/outputs/<run_name>/fold<k>/:
   oof.npy [n_val,3] softmax probs, oof.csv (id + probs), test_probs.npy [6000,3],
-  metrics.json. Label order: BENIGN, JAILBREAK, PROMPT_INJECTION. Last epoch is used.
+  test_ids.npy [6000] (test.csv id order of test_probs rows), metrics.json. Label order: BENIGN, JAILBREAK, PROMPT_INJECTION. Last epoch is used.
 """
 
 from modal_app.common import VOLUMES, app, image, volume
@@ -352,19 +356,54 @@ def train_fold(cfg: dict, fold: int):
         e = np.exp(x)
         return e / e.sum(-1, keepdims=True)
 
-    va_probs = softmax_np(trainer.predict(ds_va).predictions.astype(np.float64))[
-        ds_va.inv
-    ]
-    te_probs = softmax_np(trainer.predict(ds_te).predictions.astype(np.float64))[
-        ds_te.inv
-    ]
+    # NOTE: do NOT use trainer.predict() for OOF/test: with group_by_length=True the
+    # Trainer's eval sampler is a *randomized* LengthGroupedSampler, so predictions come
+    # back shuffled (labels shuffled with them, so eval_macro_f1 still looks fine).
+    # We run our own sequential loop over the length-sorted dataset and un-sort.
+    collate = DataCollatorWithPadding(tok)
+    infer_model = trainer.model
+    infer_model.eval()
+    dev = next(infer_model.parameters()).device
+
+    def predict_probs(ds, bs):
+        loader = torch.utils.data.DataLoader(
+            ds, batch_size=bs, shuffle=False, collate_fn=collate
+        )
+        outs = []
+        with torch.no_grad():
+            for batch in loader:
+                batch.pop("labels", None)
+                batch = {k: v.to(dev) for k, v in batch.items()}
+                with torch.autocast(
+                    "cuda", dtype=torch.bfloat16 if bf16 else torch.float16
+                ):
+                    lg = infer_model(**batch).logits
+                outs.append(lg.float().cpu().numpy())
+        return softmax_np(np.concatenate(outs).astype(np.float64))[ds.inv]
+
+    va_probs = predict_probs(ds_va, cfg["batch_size"] * 2)
+    te_probs = predict_probs(ds_te, cfg["batch_size"] * 2)
+    assert va_probs.shape == (len(va_idx), 3)
     assert te_probs.shape == (len(test_df), 3)
 
     yv = y_all[va_idx]
     pred = va_probs.argmax(-1)
     lang = train_df["language"].iloc[va_idx].to_numpy()
+    # ---- hard consistency checks: saved OOF (joined to labels by id) vs Trainer eval
+    oof_ids = train_df["id"].iloc[va_idx].to_numpy()
+    lab_by_id = dict(zip(train_df["id"], y_all))
+    yv_join = np.array([lab_by_id[i] for i in oof_ids])
+    assert (yv_join == yv).all()
+    f1_oof = float(f1_score(yv_join, pred, average="macro"))
+    f1_trainer = float(trainer.evaluate(ds_va)["eval_macro_f1"])
+    print(
+        f"[fold {fold}] CHECK oof macro-F1={f1_oof:.4f} trainer eval={f1_trainer:.4f}"
+    )
+    assert np.allclose(va_probs.sum(-1), 1.0) and np.allclose(te_probs.sum(-1), 1.0)
+
     metrics = {
         "fold": fold,
+        "eval_macro_f1": f1_trainer,
         "macro_f1": float(f1_score(yv, pred, average="macro")),
         "per_class_f1": dict(
             zip(labels, map(float, f1_score(yv, pred, average=None, labels=[0, 1, 2])))
@@ -382,10 +421,12 @@ def train_fold(cfg: dict, fold: int):
         "epoch_seconds": timer.times,
         "n_train": len(ds_tr),
         "n_val": len(ds_va),
+        "label_order": labels,
         "cfg": cfg,
     }
     np.save(out_dir / "oof.npy", va_probs)
     np.save(out_dir / "test_probs.npy", te_probs)
+    np.save(out_dir / "test_ids.npy", test_df["id"].to_numpy())
     oof_df = pd.DataFrame(va_probs, columns=[f"p_{lab}" for lab in labels])
     oof_df.insert(0, "id", train_df["id"].iloc[va_idx].to_numpy())
     oof_df.to_csv(out_dir / "oof.csv", index=False)
@@ -395,6 +436,10 @@ def train_fold(cfg: dict, fold: int):
         tok.save_pretrained(str(out_dir / "model"))
     volume.commit()
     print(f"[fold {fold}] macro-F1={metrics['macro_f1']:.4f} -> {out_dir}")
+    # asserted AFTER saving so a finished run is never thrown away
+    assert abs(f1_oof - f1_trainer) < 0.01, (
+        f"OOF/eval macro-F1 mismatch: {f1_oof:.4f} vs {f1_trainer:.4f}"
+    )
     return metrics
 
 

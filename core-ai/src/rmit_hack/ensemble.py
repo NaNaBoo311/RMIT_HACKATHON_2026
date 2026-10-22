@@ -38,7 +38,7 @@ def tune_bias(logp, y, lo=-3.0, hi=3.0, step=0.1):
     return best, best_b
 
 
-def load_run(run_dir: Path, ids: np.ndarray):
+def load_run(run_dir: Path, ids: np.ndarray, test_ids: np.ndarray):
     """Return oof [N,3] (nan where missing), test mean [T,3], available folds."""
     id2pos = {i: p for p, i in enumerate(ids)}
     oof = np.full((len(ids), K), np.nan)
@@ -49,7 +49,15 @@ def load_run(run_dir: Path, ids: np.ndarray):
         df = pd.read_csv(fd / "oof.csv")
         pos = df["id"].map(id2pos).to_numpy()
         oof[pos] = df[[f"p_{lab}" for lab in LABELS]].to_numpy()
-        tests.append(np.load(fd / "test_probs.npy"))
+        tp = np.load(fd / "test_probs.npy")
+        assert tp.shape == (len(test_ids), K), f"{fd}: bad test_probs shape {tp.shape}"
+        if (fd / "test_ids.npy").exists():
+            saved = np.load(fd / "test_ids.npy", allow_pickle=True)
+            assert (saved == test_ids).all(), f"{fd}: test_ids order != test.csv"
+        else:
+            print(f"WARNING {fd}: no test_ids.npy; assuming test.csv order")
+        assert df["id"].is_unique and not np.isnan(oof[pos]).any()
+        tests.append(tp)
         folds.append(int(fd.name.removeprefix("fold")))
     if not tests:
         raise SystemExit(f"no complete folds in {run_dir}")
@@ -82,7 +90,7 @@ def main():
 
     oofs, tests = [], []
     for r in a.runs:
-        o, t, fl = load_run(r, ids)
+        o, t, fl = load_run(r, ids, test["id"].to_numpy())
         have = ~np.isnan(o[:, 0])
         print(
             f"{r}: folds {fl}  OOF macro-F1 (n={have.sum()}) = {macro_f1(y[have], o[have].argmax(-1)):.4f}"
