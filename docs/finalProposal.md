@@ -1,5 +1,6 @@
 # AIgree
-### Hệ thống AI y tế đọc hồ sơ bệnh án dựa trên cơ chế đồng thuận phân tán từ bệnh nhân, bệnh viện và Sở Y tế.
+### Hệ thống AI truy cập dữ liệu dựa trên cơ chế đồng thuận phân tán ứng dụng trong lĩnh vực y tế
+*Trong y tế: AI chỉ đọc phần hồ sơ bệnh án mà bệnh nhân, bệnh viện và Sở Y tế đồng thuận.*
 *RMIT Hackathon 2026 · UNLOCKED Challenge 2 (Tide) · Team HCMUT NeuroX*
 
 > **AI đề xuất · Con người đồng ý · Mật mã thực thi.**
@@ -116,6 +117,10 @@ Chi tiết kỹ thuật để build (API, dữ liệu, thứ tự thiết lập 
 - **Duyệt 2/3:** hiện đếm 2 bên bất kỳ. Bản thật dùng **Forseti** để bắt buộc phải có chữ ký của bệnh nhân với ngăn nhạy cảm.
 - **Thời hạn quyền:** hiện cấp theo lượt khám. Bước tiếp theo là quyền **just-in-time**, mỗi câu hỏi một quyền tự hết hạn.
 - **LLM:** phần đã được duyệt vẫn đi qua LLM bên ngoài. Bản thật dùng **model tự host** tại bệnh viện.
+- **Lĩnh vực khác:** cùng cơ chế áp dụng được cho mọi nơi AI cần chạm vào dữ liệu nhạy cảm của nhiều bên:
+  - **Tài chính:** AI thẩm định khoản vay, được khách hàng, ngân hàng và cơ quan giám sát đồng thuận.
+  - **Giáo dục:** AI đọc học bạ, được học sinh, phụ huynh và nhà trường đồng thuận.
+  - **Pháp lý:** AI rà soát hồ sơ vụ việc, được thân chủ, luật sư và tòa án đồng thuận.
 
 ---
 
