@@ -1,0 +1,21 @@
+# Python / uv
+__pycache__/
+*.py[cod]
+.venv/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Data & outputs (do not commit Kaggle data)
+data/raw/*
+data/processed/*
+!data/**/.gitkeep
+outputs/
+submissions/*.csv
+*.zip
+
+# Secrets
+.env
+kaggle.json
+.modal.toml
+
+.DS_Store
