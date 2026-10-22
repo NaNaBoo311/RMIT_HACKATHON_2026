@@ -92,11 +92,10 @@ Nguyên nhân: `group_by_length=True` làm `trainer.predict()` trả về dự �
 |---|---|---|---|
 | `mistral7b_lora_v2` (teacher) | 42 | no | 0.9744 |
 | `mistral7b_lora_v3` | 2 | no | 0.9721 |
-| `mistral7b_lora_v4` | 3 | no | (fill in after run) |
+| `mistral7b_lora_v4` | 3 | no | 0.9763 |
 | `mistral_pl95` | 7 | teacher v2, thr 0.95 | 0.9793 |
-| `mistral_pl95_s2` | 11 | teacher v2, thr 0.95 | (fill in after run) |
 
-Blend of v2+v3+pl95 (verified): OOF macro-F1 **0.9815** (raw argmax). Final OOF of all 5 runs: (fill in from the `raw OOF macro-F1` line of the blend output).
+Blend of v2+v3+pl95 (verified): OOF macro-F1 **0.9815** (raw argmax). **Final (v2+v3+v4+pl95) OOF macro-F1: 0.9821** (raw argmax, no thresholds); `submissions/FINAL_mistral.csv` sha256 `53ad2466e6b6baf25dc04b5dc6d130f058bed80a1b60e876184220afa833e406`. `mistral_pl95_s2` was cancelled (out of GPU credit) and is not part of the final.
 
 **Pseudo-label / Gán nhãn giả.** Teacher = chính model Mistral `mistral7b_lora_v2` của chúng tôi, dự đoán trên text của tập test chưa có nhãn; chỉ giữ các mẫu có `max prob >= 0.95` và thêm vào tập train của mỗi fold (trọng số 1.0). Không có nhãn tay, không có dữ liệu ngoài. / The teacher is our own Mistral v2 run predicting on the unlabeled test text; only samples with max prob >= 0.95 are added to each fold's training set. No hand labels, no external data. (Validation fold rows are never pseudo-labeled from labels; OOF is computed on held-out train rows.)
 
@@ -104,7 +103,7 @@ Blend of v2+v3+pl95 (verified): OOF macro-F1 **0.9815** (raw argmax). Final OOF 
 
 ```bash
 uv run python -m rmit_hack.ensemble outputs/mistral7b_lora_v2 outputs/mistral7b_lora_v3 outputs/mistral7b_lora_v4 \
-    outputs/mistral_pl95 outputs/mistral_pl95_s2 --avg geo --no-bias --name FINAL_mistral
+    outputs/mistral_pl95 --avg geo --no-bias --name FINAL_mistral
 ```
 
 Blend là deterministic (đã kiểm: chạy 2 lần cho cùng sha256).
@@ -119,7 +118,7 @@ RUNS="mistral7b_lora_v2 mistral7b_lora_v3 mistral_pl95" ./scripts/reproduce_fina
 
 Danh sách run nằm ở một chỗ: biến `DEFAULT_RUNS` trong `scripts/reproduce_final.sh`. Output: `submissions/FINAL_mistral.csv`. Chạy full cần Modal (profile `xaongoctan`) với GPU **A100-80GB** (~30-50 phút/fold, 5 fold song song mỗi run) và Kaggle token. Seed + cfg đầy đủ của từng run lưu trong `outputs/<run>/fold*/metrics.json` (key `cfg`). Training trên GPU không bit-exact giữa các lần chạy; tính tái tạo được đảm bảo ở bước blend từ các output đã lưu và ở công thức/seed cố định. / GPU training is not bit-exact across reruns; exact reproducibility is guaranteed for the blend step given the saved outputs, and for recipe + seeds.
 
-**Git commit to cite:** (fill in) — at time of writing HEAD was `7e86f10`, but `modal_app/train.py`, `ensemble.py` and `blend_full.py` had uncommitted changes (pseudo-label/tokenizer/full-fit options); commit them and cite that hash.
+**Git commit to cite:** the commit that adds this line (code that produced every final run is in `1af24d1` and later).
 
 **Experiments only, NOT part of the final / Chỉ là thử nghiệm, không thuộc bài nộp cuối:** mmBERT-base, XLM-R-large, wolf-defender and mixed-backbone blends (`submissions/mmbert_*`, `xlmr_*`, `BLEND_*`, `XBACKBONE_*`) were exploratory; none of them is used in `FINAL_mistral.csv`.
 

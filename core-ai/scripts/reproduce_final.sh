@@ -14,7 +14,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # ---- the ONE place that defines the final run list (order = blend order) ----
-DEFAULT_RUNS="mistral7b_lora_v2 mistral7b_lora_v3 mistral7b_lora_v4 mistral_pl95 mistral_pl95_s2"
+DEFAULT_RUNS="mistral7b_lora_v2 mistral7b_lora_v3 mistral7b_lora_v4 mistral_pl95"
 RUNS="${RUNS:-$DEFAULT_RUNS}"
 NAME="${NAME:-FINAL_mistral}"
 
@@ -66,7 +66,7 @@ pids=()
 train mistral7b_lora_v3 --seed 2 & pids+=($!)
 train mistral7b_lora_v4 --seed 3 & pids+=($!)
 train mistral_pl95    --seed 7  --pseudo-run "$TEACHER" --pseudo-threshold 0.95 & pids+=($!)
-train mistral_pl95_s2 --seed 11 --pseudo-run "$TEACHER" --pseudo-threshold 0.95 & pids+=($!)
+# (mistral_pl95_s2 was cancelled for lack of GPU credit; not part of the final)
 for p in "${pids[@]}"; do wait "$p"; done
 
 # ---- (3) pull outputs ----
