@@ -50,6 +50,9 @@ DEFAULTS = {
     "lora_dropout": 0.05,
     "save_model": False,
     "max_train_samples": None,
+    "pseudo_run": "",  # run name whose test_probs.npy are used as pseudo labels
+    "pseudo_threshold": 0.95,
+    "fgm_eps": 0.0,  # >0 enables FGM adversarial training on word embeddings
 }
 
 
@@ -79,7 +82,10 @@ def train_fold(cfg: dict, fold: int):
     run_name = cfg["run_name"]
     labels = config.LABELS
     label2id = {lab: i for i, lab in enumerate(labels)}
-    out_dir = config.MODAL_OUTPUT_DIR / run_name / f"fold{fold}"
+    full_fit = fold < 0 or bool(cfg.get("full_fit"))  # train on ALL rows, no eval/OOF
+    out_dir = config.MODAL_OUTPUT_DIR / run_name / (
+        f"full_s{cfg['seed']}" if full_fit else f"fold{fold}"
+    )
     out_dir.mkdir(parents=True, exist_ok=True)
     set_seed(cfg["seed"])
     print(f"[fold {fold}] cfg={cfg}")
@@ -96,12 +102,14 @@ def train_fold(cfg: dict, fold: int):
     y_all = train_df["label"].map(label2id).to_numpy()
     tr_idx = np.where(train_df["fold"].to_numpy() != fold)[0]
     va_idx = np.where(train_df["fold"].to_numpy() == fold)[0]
+    if full_fit:
+        tr_idx, va_idx = np.arange(len(train_df)), np.array([], dtype=int)
     if cfg["max_train_samples"]:
         rng = np.random.RandomState(0)
         tr_idx = rng.permutation(tr_idx)[: int(cfg["max_train_samples"])]
 
     # ---- tokenizer + head/tail truncation at token level
-    tok = AutoTokenizer.from_pretrained(cfg["model_name"])
+    tok = AutoTokenizer.from_pretrained(cfg.get("tokenizer_name") or cfg["model_name"])
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
     # special-token template (prefix/suffix), derived empirically (works across tokenizer backends)
@@ -151,11 +159,37 @@ def train_fold(cfg: dict, fold: int):
             return item
 
     t0 = time.time()
-    ds_tr = DS(train_df["text"].iloc[tr_idx].tolist(), y_all[tr_idx])
-    ds_va = DS(train_df["text"].iloc[va_idx].tolist(), y_all[va_idx], sort=True)
+    tr_texts = train_df["text"].iloc[tr_idx].tolist()
+    tr_y = y_all[tr_idx]
+    if cfg["pseudo_run"]:
+        pdir = config.MODAL_OUTPUT_DIR / cfg["pseudo_run"]
+        pfolds = sorted(pdir.glob("fold*/test_probs.npy"))
+        assert pfolds, f"no test_probs.npy under {pdir}"
+        ids0 = np.load(pfolds[0].parent / "test_ids.npy", allow_pickle=True)
+        pp = np.mean([np.load(f) for f in pfolds], axis=0)
+        for f in pfolds:
+            assert (np.load(f.parent / "test_ids.npy", allow_pickle=True) == ids0).all()
+        pos_by_id = {i: k for k, i in enumerate(test_df["id"].to_numpy())}
+        order = np.array([pos_by_id[i] for i in ids0])
+        sel = pp.max(-1) >= cfg["pseudo_threshold"]
+        rows = order[sel]
+        pl = pp[sel].argmax(-1)
+        tr_texts = tr_texts + test_df["text"].iloc[rows].tolist()
+        tr_y = np.concatenate([tr_y, pl])
+        print(
+            f"[fold {fold}] pseudo-labels from {cfg['pseudo_run']} ({len(pfolds)} folds) "
+            f"thr={cfg['pseudo_threshold']}: added {int(sel.sum())}/{len(sel)} "
+            + str({labels[c]: int((pl == c).sum()) for c in range(len(labels))})
+        )
+    ds_tr = DS(tr_texts, tr_y)
+    ds_va = (
+        None
+        if full_fit
+        else DS(train_df["text"].iloc[va_idx].tolist(), y_all[va_idx], sort=True)
+    )
     ds_te = DS(test_df["text"].tolist(), sort=True)
     print(
-        f"[fold {fold}] tokenized in {time.time() - t0:.0f}s; train={len(ds_tr)} val={len(ds_va)}"
+        f"[fold {fold}] tokenized in {time.time() - t0:.0f}s; train={len(ds_tr)} val={len(ds_va) if ds_va else 0}"
     )
 
     # ---- model
@@ -217,7 +251,7 @@ def train_fold(cfg: dict, fold: int):
         ), "classification head not trainable"
 
     # ---- loss weights
-    counts = np.bincount(y_all[tr_idx], minlength=len(labels)).astype(float)
+    counts = np.bincount(tr_y, minlength=len(labels)).astype(float)
     cw_mode = cfg["class_weights"]
     if cw_mode == "sqrt":
         cw = (counts.max() / counts) ** 0.5
@@ -239,6 +273,27 @@ def train_fold(cfg: dict, fold: int):
                 label_smoothing=cfg["label_smoothing"],
             )
             return (loss, out) if return_outputs else loss
+
+        def training_step(self, model, inputs, *a, **k):
+            eps = cfg["fgm_eps"]
+            if not eps or eps <= 0:
+                return super().training_step(model, inputs, *a, **k)
+            # FGM: compute_loss pops "labels", so give each pass its own shallow copy
+            loss = super().training_step(model, dict(inputs), *a, **k)
+            emb = model.get_input_embeddings().weight
+            g = emb.grad
+            if g is None:
+                return loss
+            norm = torch.norm(g.float())
+            if not torch.isfinite(norm) or norm == 0:
+                return loss
+            backup = emb.data.clone()
+            emb.data.add_((eps * g / norm).to(emb.dtype))
+            try:
+                loss_adv = super().training_step(model, dict(inputs), *a, **k)
+            finally:
+                emb.data.copy_(backup)
+            return (loss + loss_adv) / 2
 
         def create_optimizer(self):
             if self.optimizer is not None:
@@ -321,7 +376,7 @@ def train_fold(cfg: dict, fold: int):
         gradient_accumulation_steps=cfg["grad_accum"],
         **warmup_kw,
         weight_decay=cfg["weight_decay"],
-        eval_strategy="epoch",
+        eval_strategy="no" if full_fit else "epoch",
         save_strategy="no",
         bf16=bf16,
         fp16=not bf16,
@@ -381,8 +436,26 @@ def train_fold(cfg: dict, fold: int):
                 outs.append(lg.float().cpu().numpy())
         return softmax_np(np.concatenate(outs).astype(np.float64))[ds.inv]
 
-    va_probs = predict_probs(ds_va, cfg["batch_size"] * 2)
     te_probs = predict_probs(ds_te, cfg["batch_size"] * 2)
+    if full_fit:
+        assert te_probs.shape == (len(test_df), 3)
+        assert np.allclose(te_probs.sum(-1), 1.0)
+        metrics = {
+            "full_fit": True,
+            "seed": cfg["seed"],
+            "train_seconds": train_secs,
+            "epoch_seconds": timer.times,
+            "n_train": len(ds_tr),
+            "label_order": labels,
+            "cfg": cfg,
+        }
+        np.save(out_dir / "test_probs.npy", te_probs)
+        np.save(out_dir / "test_ids.npy", test_df["id"].to_numpy())
+        (out_dir / "metrics.json").write_text(json.dumps(metrics, indent=2))
+        volume.commit()
+        print(f"[full-fit s{cfg['seed']}] done in {train_secs:.0f}s -> {out_dir}")
+        return metrics
+    va_probs = predict_probs(ds_va, cfg["batch_size"] * 2)
     assert va_probs.shape == (len(va_idx), 3)
     assert te_probs.shape == (len(test_df), 3)
 
@@ -446,6 +519,7 @@ def train_fold(cfg: dict, fold: int):
 @app.local_entrypoint()
 def main(
     model_name: str = "xlm-roberta-base",
+    tokenizer_name: str = "",
     run_name: str = "",
     folds: str = "0,1,2,3,4",
     gpu: str = "",
@@ -466,6 +540,11 @@ def main(
     load_4bit: bool = False,
     save_model: bool = False,
     max_train_samples: int = 0,
+    pseudo_run: str = "",
+    pseudo_threshold: float = 0.95,
+    fgm_eps: float = 0.0,
+    full_fit: bool = False,
+    seeds: str = "",
 ):
     from datetime import datetime
 
@@ -473,6 +552,7 @@ def main(
     cfg = {
         "run_name": run_name,
         "model_name": model_name,
+        "tokenizer_name": tokenizer_name,
         "max_len": max_len,
         "head_tokens": head_tokens or None,
         "lr": lr or None,
@@ -490,7 +570,29 @@ def main(
         "load_4bit": load_4bit,
         "save_model": save_model,
         "max_train_samples": max_train_samples or None,
+        "pseudo_run": pseudo_run,
+        "pseudo_threshold": pseudo_threshold,
+        "fgm_eps": fgm_eps,
     }
+    if full_fit:  # one container per seed, all rows, no eval
+        seed_list = [int(x) for x in seeds.split(",")] if seeds else [seed]
+        fn = train_fold.with_options(gpu=gpu) if gpu and gpu != GPU else train_fold
+        print(f"run={run_name} FULL-FIT seeds={seed_list} gpu={gpu or GPU}\ncfg={cfg}")
+        res = list(
+            fn.starmap(
+                [({**cfg, "seed": s, "full_fit": True}, -1) for s in seed_list],
+                return_exceptions=True,
+            )
+        )
+        for s, r in zip(seed_list, res):
+            if isinstance(r, BaseException):
+                print(f"seed {s} FAILED: {r!r}")
+            else:
+                print(
+                    f"seed {s} ok: train {r['train_seconds']:.0f}s epochs {[round(t) for t in r['epoch_seconds']]}"
+                )
+        print(f"Pull: ./scripts/pull_outputs.sh {run_name}")
+        return
     fold_list = [int(f) for f in folds.split(",")]
     fn = train_fold.with_options(gpu=gpu) if gpu and gpu != GPU else train_fold
     print(f"run={run_name} folds={fold_list} gpu={gpu or GPU}\ncfg={cfg}")
