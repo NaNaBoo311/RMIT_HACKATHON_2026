@@ -81,6 +81,8 @@ Copy each service's `.env.example` to `.env` (or `.env.local` for the frontend) 
 
 Training, data download, Modal GPU runs and submission steps live in [`core-ai/README.md`](core-ai/README.md).
 
+Provenance of the final result (trained on Modal, app IDs, billing, Kaggle history): [`docs/C1_PROVENANCE.md`](docs/C1_PROVENANCE.md).
+
 ### AI model & research
 
 Rules allow exactly **one** approved pretrained backbone (no blending across backbones). Metric: macro-F1 (BENIGN / JAILBREAK / PROMPT_INJECTION), 6 submissions total. Screening 1 fold each on Modal L4; the winner by OOF macro-F1 gets a 5-fold run. **Final pick: TODO.**

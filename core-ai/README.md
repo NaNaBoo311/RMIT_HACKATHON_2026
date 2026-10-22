@@ -113,7 +113,7 @@ Fold-only fallback (v2+v3+v4+pl95): OOF macro-F1 **0.9821** (raw argmax, no thre
 
 ```bash
 uv run python -m rmit_hack.blend_full \
-    --folds outputs/mistral7b_lora_v2 outputs/mistral7b_lora_v3 outputs/mistral7b_lora_v4 outputs/mistral_pl95 outputs/mistral_pl95_s2 \
+    --folds outputs/mistral7b_lora_v2 outputs/mistral7b_lora_v3 outputs/mistral7b_lora_v4 outputs/mistral_pl95 \
     --full outputs/mistral_full_pl outputs/mistral_full --avg geo --name FINAL_mistral_full
 # fallback (folds only, 4 runs):
 uv run python -m rmit_hack.ensemble outputs/mistral7b_lora_v2 outputs/mistral7b_lora_v3 outputs/mistral7b_lora_v4 \
@@ -121,6 +121,8 @@ uv run python -m rmit_hack.ensemble outputs/mistral7b_lora_v2 outputs/mistral7b_
 ```
 
 Blend là deterministic (đã kiểm: chạy 2 lần cho cùng sha256; `blend_full` chỉ-fold tái tạo đúng byte `FINAL_mistral.csv`).
+
+**Provenance / Nguồn gốc:** Modal app IDs, billing, Kaggle history: [`../docs/C1_PROVENANCE.md`](../docs/C1_PROVENANCE.md).
 
 **Reproduce / Cách tái tạo** (từ `core-ai/`):
 
