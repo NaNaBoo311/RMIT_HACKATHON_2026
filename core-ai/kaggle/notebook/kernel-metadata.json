@@ -1,5 +1,5 @@
 {
-  "id": "<KAGGLE_USERNAME>/RMIT_SGS_HCMUT_NeuroX_C1",
+  "id": "nostidus/rmit-sgs-hcmut-neurox-c1",
   "title": "RMIT_SGS_HCMUT_NeuroX_C1",
   "code_file": "RMIT_SGS_HCMUT_NeuroX_C1.ipynb",
   "language": "python",
@@ -7,7 +7,7 @@
   "is_private": "true",
   "enable_gpu": "false",
   "enable_internet": "false",
-  "dataset_sources": ["<KAGGLE_USERNAME>/rmit-c1-mistral-final-preds"],
+  "dataset_sources": ["nostidus/rmit-c1-mistral-final-preds"],
   "competition_sources": ["rmit-hackathon-2026"],
   "kernel_sources": [],
   "model_sources": []

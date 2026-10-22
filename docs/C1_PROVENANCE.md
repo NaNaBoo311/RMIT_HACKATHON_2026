@@ -142,3 +142,8 @@ Screenshots of the Modal Apps list and Billing page for all 3 workspaces (`xaong
 ## Screenshots
 
 Modal dashboard screenshots (Apps list, stopped `rmit-hack-2026` runs) are in [`docs/evidence/`](evidence/).
+
+## Public verification on Kaggle
+
+- Kaggle notebook: https://www.kaggle.com/code/nostidus/rmit-sgs-hcmut-neurox-c1 (version 1, CPU, internet off). It loads the saved per-model predictions from the dataset below, prints OOF 0.9821 and writes `submission.csv` with sha256 `125781c7d933dd24a0907cf17f65321c5efb3b85ec5027be2d151d1baa603b18`. That hash is identical to the final Kaggle submission (verified from the kernel output on 2026-10-22 ~17:15 UTC+7).
+- Kaggle dataset: https://www.kaggle.com/datasets/nostidus/rmit-c1-mistral-final-preds (per-fold/per-seed `test_probs.npy`, `test_ids.npy`, `oof.csv`, `folds.csv`).
